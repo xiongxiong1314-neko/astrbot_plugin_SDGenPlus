@@ -1040,9 +1040,16 @@ class SDGenerator(Star):
         event: AstrMessageEvent,
         prompt: str,
         allow_generate_prompt: bool,
-        allow_extract_prompt: bool
+        allow_extract_prompt: bool,
+        for_tool: bool = False
     ):
-        """Shared image generation logic for command/tool callers."""
+        """Shared image generation logic for command/tool callers.
+
+        AstrBot 当前稳定版（v4.27.3）会包裹 `@llm_tool` 的异步生成器并只保留**最后**一个
+        yield（`_PermissionGuardedTool.call`）。因此工具路径（for_tool=True）只 yield
+        最终结果（图片），不 yield 任何过程提示/成功文字，否则图片会被"最后一条
+        提示词"顶掉而丢失。
+        """
         async with self.task_semaphore:
             self.active_tasks += 1
             try:
@@ -1058,7 +1065,7 @@ class SDGenerator(Star):
                     yield event.plain_result("⚠️ 同webui无连接，目前无法生成图片！")
                     return
 
-                verbose = self.config["verbose"]
+                verbose = self.config["verbose"] and not for_tool
                 if verbose:
                     yield event.plain_result("🖌️ 生成图像阶段，这可能需要一段时间...")
 
@@ -1071,7 +1078,7 @@ class SDGenerator(Star):
                 positive_prompt = self._build_positive_prompt(prompt, generated_prompt)
 
                 #输出正面提示词
-                if self.config.get("enable_show_positive_prompt", False):
+                if self.config.get("enable_show_positive_prompt", False) and not for_tool:
                     yield event.plain_result(f"正面提示词：{positive_prompt}")
 
                 # 生成图像
@@ -1113,6 +1120,7 @@ class SDGenerator(Star):
                     # 将链式结果发送给事件
                     yield event.chain_result(chain)
 
+                # 工具路径下不 yield 成功文字，确保图片是最后一个 yield
                 if verbose:
                     yield event.plain_result("✅ 图像生成成功")
 
@@ -1958,7 +1966,8 @@ class SDGenerator(Star):
                 event,
                 prompt,
                 allow_generate_prompt=False,
-                allow_extract_prompt=False
+                allow_extract_prompt=False,
+                for_tool=True
             ):
                 # 根据生成器的每一个结果返回响应
                 yield result
